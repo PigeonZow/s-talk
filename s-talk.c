@@ -21,7 +21,6 @@ void sendString(void *socketID) {
 
 }
 
-//
 // get IPv4 sockaddr 
 void * getInAddr(struct sockaddr *sa)
 {
