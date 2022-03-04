@@ -251,7 +251,7 @@ void *print(void *arg)
         // might signal recv_ready with an empty list to unblock
         if (output_buf != NULL)
         {
-            puts(output_buf);
+            printf("%s", output_buf);
         }
         pthread_mutex_unlock(&lock_recv);
     }
