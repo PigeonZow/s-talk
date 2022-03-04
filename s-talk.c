@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <signal.h>
-#include <errno.h>
+// #include <errno.h>
 #include <string.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -25,7 +25,7 @@ char * SEND_BUF;
 
 pthread_t thread_input, thread_send, thread_receive, thread_print;
 pthread_cond_t send_ready, recv_ready;
-pthread_mutex_t lock;
+pthread_mutex_t lock_send, lock_recv;
 List *g_send_buf, *g_recv_buf;
 
 // get IPv4 sockaddr
@@ -36,6 +36,7 @@ void *get_in_addr(struct sockaddr *sa)
         return &(((struct sockaddr_in *)sa)->sin_addr);
     }
     perror("not IPV4");
+    exit(EXIT_FAILURE);
 }
 
 // setup server port
@@ -63,7 +64,7 @@ void setup_listen_port(char *myPort)
             perror("listener: socket");
             continue;
         }
-
+        // fcntl(SERVFD, F_SETFL, O_NONBLOCK);
         if (bind(SERVFD, SERV_P->ai_addr, SERV_P->ai_addrlen) == -1)
         {
             close(SERVFD);
@@ -168,23 +169,18 @@ void *input(void *arg)
             exit(EXIT_FAILURE);
         }
         fgets(input_buf, MAX_CHARS_PER_LINE, stdin);
-        pthread_mutex_lock(&lock);
-        if (!strcmp(input_buf, "!"))
+        pthread_mutex_lock(&lock_send);
+        if (strcmp(input_buf, "!\n") == 0)
         {
             active = false;
-            free(input_buf);
         }
-        else
+        if (List_append(g_send_buf, input_buf))
         {
-            if (List_append(g_send_buf, input_buf))
-            {
-                exit(EXIT_FAILURE);
-            }
+            exit(EXIT_FAILURE);
         }
         pthread_cond_signal(&send_ready);
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&lock_send);
     }
-
     return NULL;
 }
 
@@ -193,8 +189,8 @@ void *dispatch(void *arg)
 {
     while (active)
     {
-        pthread_mutex_lock(&lock);
-        pthread_cond_wait(&send_ready, &lock);
+        pthread_mutex_lock(&lock_send);
+        pthread_cond_wait(&send_ready, &lock_send);
         List_first(g_send_buf);
         char *msg = (char *)List_remove(g_send_buf);
         // required for proper shutdown of this thread since input()
@@ -204,8 +200,9 @@ void *dispatch(void *arg)
             send_string(msg);
         }
         free(msg);
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&lock_send);
     }
+    return NULL;
 }
 
 // attempts to receive one line from the remote user, appending to recv_buff
@@ -220,9 +217,9 @@ void *receive(void *arg)
             exit(EXIT_FAILURE);
         }
         // [receive item, assumed to be non-null]
-        receive_string();
-        pthread_mutex_lock(&lock);
-        if (!strcmp(msg, "!"))
+        msg = receive_string();
+        pthread_mutex_lock(&lock_recv);
+        if (strcmp(msg, "!") == 0)
         {
             active = false;
             free(msg);
@@ -235,8 +232,9 @@ void *receive(void *arg)
             }
         }
         pthread_cond_signal(&recv_ready);
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&lock_recv);
     }
+    return NULL;
 }
 
 // pops the first item of recv_buff and displays it to the local user
@@ -244,8 +242,8 @@ void *print(void *arg)
 {
     while (active)
     {
-        pthread_mutex_lock(&lock);
-        pthread_cond_wait(&recv_ready, &lock);
+        pthread_mutex_lock(&lock_recv);
+        pthread_cond_wait(&recv_ready, &lock_recv);
         List_first(g_recv_buf);
         char *output_buf = (char *)List_remove(g_recv_buf);
         // simply don't print anything if list is empty or item is NULL
@@ -255,9 +253,8 @@ void *print(void *arg)
         {
             puts(output_buf);
         }
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&lock_recv);
     }
-
     return NULL;
 }
 
@@ -283,10 +280,14 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
     puts("DONE");
-    printf("Initializing mutex... ");
-    if (pthread_mutex_init(&lock, NULL)) {
+    printf("Initializing mutexes... ");
+    if (pthread_mutex_init(&lock_send, NULL)) {
         exit(EXIT_FAILURE);
     }
+    if (pthread_mutex_init(&lock_recv, NULL)) {
+        exit(EXIT_FAILURE);
+    }
+    puts("DONE");
     printf("Initializing condition variables... ");
     if (pthread_cond_init(&send_ready, NULL)) {
         exit(EXIT_FAILURE);
@@ -296,6 +297,7 @@ int main(int argc, char *argv[])
     }
     puts("DONE");
     bool error;
+    printf("Initializing threads... ");
     error = pthread_create(&thread_input, NULL, &input, NULL);
     if (error) {
         exit(EXIT_FAILURE);
@@ -312,15 +314,32 @@ int main(int argc, char *argv[])
     if (error) {
         exit(EXIT_FAILURE);
     }
-    pthread_join(thread_input, NULL);
-    pthread_join(thread_print, NULL);
-    pthread_join(thread_receive, NULL);
-    pthread_join(thread_send, NULL);
+    puts("DONE");
+    error = pthread_join(thread_input, NULL);
+    if (error) {
+        exit(EXIT_FAILURE);
+    }
+    error = pthread_join(thread_send, NULL);
+    if (error) {
+        exit(EXIT_FAILURE);
+    }
+    pthread_cancel(thread_receive);
+    error = pthread_join(thread_receive, NULL);
+    if (error) {
+        exit(EXIT_FAILURE);
+    }
+    pthread_cancel(thread_print);
+    error = pthread_join(thread_print, NULL);
+    if (error) {
+        exit(EXIT_FAILURE);
+    }
+    puts("Stopped threads");
 
     // cleanup
     pthread_cond_destroy(&send_ready);
     pthread_cond_destroy(&recv_ready);
-    pthread_mutex_destroy(&lock);
+    pthread_mutex_destroy(&lock_send);
+    pthread_mutex_destroy(&lock_recv);
     List_free(g_send_buf, free);
     List_free(g_recv_buf, free);
 
