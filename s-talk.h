@@ -4,10 +4,10 @@
 #define MAX_CHARS_PER_LINE 4096
 
 // listen socket 
-void setup_listen_port(int remotePort);
+void setup_listen_port(char *remotePort);
 
 // talk socket
-void setup_talk_port(char *remoteName, int remotePort);
+void setup_talk_port(char *remoteName, char *remotePort);
 
 // receive string 
 char *receive_string();
@@ -17,7 +17,7 @@ void send_string(char *buf);
 
 void *input(void *arg);
 
-void *send(void *arg);
+void *dispatch(void *arg);
 
 void *receive(void *arg);
 

@@ -2,6 +2,7 @@
 
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <netdb.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -9,6 +10,8 @@
 #include <signal.h>
 #include <errno.h>
 #include <string.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "s-talk.h"
 #include "list.h"
 
@@ -16,8 +19,17 @@
 #define EXIT_FAILURE 1
 #define BACKLOG 10
 
+struct addrinfo *SERV_P, *SOCK_P;
+int SERVFD, SOCKFD; // local, remote
+char * SEND_BUF;
+
+pthread_t thread_input, thread_send, thread_receive, thread_print;
+pthread_cond_t send_ready, recv_ready;
+pthread_mutex_t lock;
+List *g_send_buf, *g_recv_buf;
+
 // get IPv4 sockaddr
-void *getInAddr(struct sockaddr *sa)
+void *get_in_addr(struct sockaddr *sa)
 {
     if (sa->sa_family == AF_INET)
     {
@@ -27,7 +39,7 @@ void *getInAddr(struct sockaddr *sa)
 }
 
 // setup server port
-void setup_listen_port(int myPort)
+void setup_listen_port(char *myPort)
 {
     struct addrinfo hints, *servinfo;
     int rv;
@@ -77,7 +89,7 @@ char *receive_string()
     int numbytes;
     socklen_t addr_len;
     struct sockaddr_storage their_addr;
-    char buf[MAX_CHARS_PER_LINE];
+    char *buf = malloc(sizeof(char) * MAX_CHARS_PER_LINE);
     char s[INET_ADDRSTRLEN]; // IPv4 size
 
     addr_len = sizeof their_addr;
@@ -93,7 +105,7 @@ char *receive_string()
     return buf;
 }
 
-void setup_talk_port(char *remoteName, int remotePort)
+void setup_talk_port(char *remoteName, char *remotePort)
 {
     struct addrinfo hints, *servinfo;
     int rv;
@@ -140,11 +152,6 @@ void send_string(char *buf)
     printf("talker: sent %d bytes\n", numbytes);
 }
 
-pthread_t thread_input, thread_send, thread_receive, thread_print;
-pthread_cond_t send_ready, recv_ready;
-pthread_mutex_t lock;
-List *g_send_buf, *g_recv_buf;
-
 // all threads contain while(active)
 // false when reading "!" from stdin or receiving from the remote user
 bool active = true;
@@ -182,7 +189,7 @@ void *input(void *arg)
 }
 
 // pops the first item of send_buf and sends it to the remote user
-void *send(void *arg)
+void *dispatch(void *arg)
 {
     while (active)
     {
@@ -254,10 +261,6 @@ void *print(void *arg)
     return NULL;
 }
 
-struct addrinfo *SERV_P, *SOCK_P;
-int SERVFD, SOCKFD; // local, remote
-char * SEND_BUF;
-
 int main(int argc, char *argv[])
 {
     if (argc != 4)
@@ -265,9 +268,9 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
     // remote connection info
-    const int myPort = atoi(argv[1]);
-    const char *remoteName = argv[2];
-    const int remotePort = atoi(argv[3]);
+    char *myPort = argv[1];
+    char *remoteName = argv[2];
+    char *remotePort = argv[3];
 
     // setup sockets
     setup_listen_port(myPort);
@@ -305,7 +308,7 @@ int main(int argc, char *argv[])
     if (error) {
         exit(EXIT_FAILURE);
     }
-    error = pthread_create(&thread_send, NULL, &send, NULL);
+    error = pthread_create(&thread_send, NULL, &dispatch, NULL);
     if (error) {
         exit(EXIT_FAILURE);
     }
