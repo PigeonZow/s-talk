@@ -219,10 +219,15 @@ void *receive(void *arg)
         // [receive item, assumed to be non-null]
         msg = receive_string();
         pthread_mutex_lock(&lock_recv);
-        if (strcmp(msg, "!") == 0)
+        printf("%s", msg);
+        if (strcmp(msg, "!\n") == 0)
         {
             active = false;
             free(msg);
+            pthread_cancel(thread_input);
+            pthread_mutex_lock(&lock_send);
+            pthread_cond_signal(&send_ready);
+            pthread_mutex_unlock(&lock_send);
         }
         else
         {
