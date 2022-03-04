@@ -219,7 +219,6 @@ void *receive(void *arg)
         // [receive item, assumed to be non-null]
         msg = receive_string();
         pthread_mutex_lock(&lock_recv);
-        printf("%s", msg);
         if (strcmp(msg, "!\n") == 0)
         {
             active = false;
